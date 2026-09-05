@@ -1,0 +1,14 @@
+[package]
+name = "kachow_cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+kachow_ipc.workspace = true
+serde.workspace = true
+serde_json.workspace  = true
+tokio.workspace = true
+rusqlite.workspace = true

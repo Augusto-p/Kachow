@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "kachow_core",
+    "kachow_cli",
+    "kachow_ipc",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Null <>"]
+license = "MIT"
+repository = "https://github.com/augusto-p/kachow"
+
+[workspace.dependencies]
+# Dependencia interna entre crates
+kachow_ipc = { path = "kachow_ipc" }
+
+# Dependencias externas compartidas
+tokio = { version = "1.38", features = ["full"] }
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = "0.40.2"
