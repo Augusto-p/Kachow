@@ -222,7 +222,7 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                         "Error al enviar confirmación Gama: {e}"
                                     ));
                                 }
-                                return IpcResponse::Ok;
+                                // return IpcResponse::Ok;
                             } else {
                                 return IpcResponse::Error(
                                     "Respuesta de emparejamiento inválida".to_string(),
