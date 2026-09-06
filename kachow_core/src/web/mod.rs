@@ -172,7 +172,7 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
                 if let Ok(data_original) = secret_key.decrypt(&pair_response) {
                     if let Ok(json_payload) = serde_json::from_str::<serde_json::Value>(&data_original) {
                         println!("Gama 3");
-                        if json_payload["Name"] == "Kachow-Gama"{
+                        if json_payload["name"] == "Kachow-Gama"{
                             println!("Gama 4");
                             let _ = state.storage.set_contact(&Contact {
                                 device_id: json_payload["device_id"].as_str().unwrap_or_default().to_string(),
