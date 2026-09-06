@@ -134,7 +134,6 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
         if let Message::Text(payload_json) = msg {
             // Paso A: Recibir Kachow-Alpha cifrado con PairCode
             if let Ok(pair_payload) = serde_json::from_str::<EncryptedPayload>(&payload_json) {
-                println!("Siempre Gama");
                 let payload_data = match PairCrypt::desencriptar(&pair_payload, &state.pair_key.get_key().unwrap()) {
                     Ok(data) => data,
                     Err(_) => continue,
@@ -167,6 +166,7 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
                 }
             }
 
+            println!("{}", payload_json);
             // Paso B: Recibir Kachow-Gama cifrado asimétricamente
             if let Ok(pair_response) = serde_json::from_str::<EncryptedDataPayload>(&payload_json) {
                 println!("Gama 0");
