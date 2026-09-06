@@ -64,6 +64,14 @@ impl MdnsManager {
         Ok(())
     }
 
+    pub fn normalize_service_type(service_type: &str) -> String {
+    let trimmed = service_type.trim_matches('.');
+    if trimmed.ends_with("_tcp.local") || trimmed.ends_with("_udp.local") {
+        format!("{}.", trimmed)
+    } else {
+        format!("_{}._tcp.local.", trimmed)
+    }
+}
     pub async fn listen(&self, state: Arc<KachowState>) -> Result<(), Box<dyn std::error::Error>> {
         let contacts = state.storage.get_all_contact_addresses().await;
 
@@ -95,9 +103,9 @@ impl MdnsManager {
 
                             // 2. Comprobar si empieza por "kachow-"
                             if let Some(device_id) = lower_instance.strip_prefix("kachow-") {
-                                if device_id == device_id_me {
-                                    continue; // Ignorar nuestro propio anuncio
-                                }
+                                // if device_id == device_id_me {
+                                //     continue; // Ignorar nuestro propio anuncio
+                                // }
                                 if !device_id.is_empty() {
                                     println!(
                                         "🔎 [Encontrado - {}] Device ID: '{}' | Host: {}:{}",

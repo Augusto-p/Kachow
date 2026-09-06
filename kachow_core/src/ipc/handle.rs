@@ -1,8 +1,11 @@
 use std::{path::PathBuf, sync::Arc};
 
+use crate::{
+    crypto::pair::{EncryptedPayload, PairCrypt}, database::contacts::Contact, identity::keys::{EncryptedDataPayload, IdentityKeyPair}, mdns::MdnsManager, state::KachowState, web::KachowPair,
+};
+use futures_util::{SinkExt, StreamExt};
 use kachow_ipc::ipc::structs::{Device, DeviceInfo, IpcRequest, IpcResponse};
-
-use crate::{identity::keys::IdentityKeyPair, state::KachowState};
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> IpcResponse {
     // pub async fn handle_ipc_request(req: IpcRequest) -> IpcResponse {
@@ -42,7 +45,6 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
             target_id,
             files_paths,
         } => {
-
             // hacer ping a target_id para verificar que está en línea antes de enviar los archivos
             println!(
                 "Solicitud de envío de archivos recibida: target_id={}",
@@ -54,33 +56,202 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                 println!("Archivo a enviar: {}", file.display());
             }
 
-
-
             return IpcResponse::Ok;
-        } 
-        IpcRequest::Pair { target_id, pair_code } => {
+        }
+        IpcRequest::Pair {
+            target_id,
+            pair_code,
+        } => {
             println!(
-                "Solicitud de emparejamiento recibida: target_id={} con pair_code={}",
+                "Solicitud de emparejamiento recibida: target_id={}, pair_code={}",
                 target_id, pair_code
             );
+            let identity = match state.storage.get_identity().await {
+                Some(id) => id,
+                None => {
+                    return IpcResponse::Error("No se pudo obtener la identidad local".to_string())
+                }
+            };
 
-            // Aquí se implementaría la lógica de emparejamiento real
-            // Por ahora, simplemente devolvemos Ok para indicar que la solicitud fue recibida
-            return IpcResponse::Ok;
+            let mdns_name = state
+                .get_device_value(&target_id)
+                .await
+                .unwrap_or_else(|| "".to_string());
+
+            let key = match state.storage.get_identity_secret_key().await {
+                Some(k) => k,
+                None => {
+                    return IpcResponse::Error("No se pudo obtener la clave secreta".to_string())
+                }
+            };
+
+            let pair_data: serde_json::Value = serde_json::json!({
+                "public_key": key.public_key_to_string(),
+                "Name": "Kachow-Alpha",
+            });
+
+            let public_key_crypto =
+                match PairCrypt::encriptar(&serde_json::to_string(&pair_data).unwrap(), &pair_code)
+                {
+                    Ok(crypto) => crypto,
+                    Err(e) => return IpcResponse::Error(format!("Error al encriptar: {e}")),
+                };
+
+            let url = format!("ws://{}/pair/{}", mdns_name, identity.device_id);
+            println!("Conectando a {url}...");
+
+            let (ws_stream, _) = match connect_async(&url).await {
+                Ok(conn) => conn,
+                Err(e) => return IpcResponse::Error(format!("Error al conectar WebSocket: {e}")),
+            };
+
+            println!("Conexión WebSocket establecida.");
+            let (mut write, mut read) = ws_stream.split();
+
+            while let Some(msg_result) = read.next().await {
+                let msg = match msg_result {
+                    Ok(m) => m,
+                    Err(e) => {
+                        return IpcResponse::Error(format!("Error en el stream WebSocket: {e}"))
+                    }
+                };
+
+                if let Message::Text(text) = msg {
+                    println!("Mensaje recibido del servidor: {text}");
+
+                    if text == "Save" {
+                        return IpcResponse::Ok;
+                    } else if text == "Ready" {
+                        println!("Enviando public_key_crypto al servidor...");
+                        let payload = match serde_json::to_string(&public_key_crypto) {
+                            Ok(json) => json,
+                            Err(e) => {
+                                return IpcResponse::Error(format!("Error al serializar JSON: {e}"))
+                            }
+                        };
+
+                        if let Err(e) = write.send(Message::Text(payload)).await {
+                            return IpcResponse::Error(format!("Error al enviar el mensaje: {e}"));
+                        }
+                    } else {
+                        // Intentar procesar como respuesta cifrada de emparejamiento (Kachow-Beta)
+                        if let Ok(pair_response) =
+                            serde_json::from_str::<EncryptedDataPayload>(&text)
+                        {
+                            let secret_key = state.storage.get_identity_secret_key().await.unwrap();
+                            let data_original = secret_key.decrypt(&pair_response).unwrap();
+                            let json_payload: serde_json::Value =
+                                serde_json::from_str(&data_original)
+                                    .expect("Error al deserializar el payload de emparejamiento");
+
+                            println!("Respuesta de emparejamiento recibida: {:?}", json_payload);
+                            if json_payload["name"] == "Kachow-Beta" {
+                                let public_key =
+                                    json_payload["public_key"].as_str().unwrap_or_default();
+                                println!("Emparejamiento exitoso con Kachow-Beta. Public Key: {public_key}");
+
+                                let _ = state
+                                    .storage
+                                    .set_contact(&Contact {
+                                        device_id: json_payload["device_id"]
+                                            .as_str()
+                                            .unwrap_or_default()
+                                            .to_string(),
+                                        secret_service_name: MdnsManager::normalize_service_type(&json_payload["secret_service_name"]
+                                            .as_str()
+                                            .unwrap_or_default()
+                                            .to_string()),
+                                        device_image: json_payload["device_image"]
+                                            .as_array()
+                                            .unwrap_or(&vec![])
+                                            .iter()
+                                            .map(|v| v.as_u64().unwrap_or(0) as u8)
+                                            .collect::<Vec<u8>>(),
+                                        display_name: json_payload["display_name"]
+                                            .as_str()
+                                            .unwrap_or_default()
+                                            .to_string(),
+                                        public_key: public_key.as_bytes().to_vec(),
+                                    })
+                                    .await;
+
+                                let data_me = KachowPair {
+                                    name: "Kachow-Gama".to_string(),
+                                    public_key: secret_key.verifying_key.as_bytes().to_vec(),
+                                    secret_service_name: state
+                                        .storage
+                                        .get_identity_secret_service_name()
+                                        .await
+                                        .unwrap_or_else(|| "Unknown".to_string()),
+                                    device_id: state
+                                        .storage
+                                        .get_identity_device_id()
+                                        .await
+                                        .unwrap_or_else(|| "Unknown".to_string()),
+                                    device_name: state
+                                        .storage
+                                        .get_identity_display_name()
+                                        .await
+                                        .unwrap_or_else(|| "Unknown".to_string()),
+                                    device_image: state
+                                        .storage
+                                        .get_identity_device_image()
+                                        .await
+                                        .unwrap_or_default(),
+                                };
+
+                                let data_str = serde_json::to_string(&data_me).unwrap();
+                                let encrypted_response =
+                                    IdentityKeyPair::encrypt_for_recipient(&data_str, public_key)
+                                        .map_err(|err| IpcResponse::Error(err.to_string()));
+                                let json_out = serde_json::to_string(&encrypted_response).unwrap();
+                                println!("Enviando confirmación Gama al servidor...");
+                                if let Err(e) = write.send(Message::Text(json_out)).await {
+                                    return IpcResponse::Error(format!(
+                                        "Error al enviar confirmación Gama: {e}"
+                                    ));
+                                }
+                            } else {
+                                return IpcResponse::Error(
+                                    "Respuesta de emparejamiento inválida".to_string(),
+                                );
+                            }
+                        }
+                    }
+                } else if let Message::Close(_) = msg {
+                    println!("El servidor cerró la conexión.");
+                    return IpcResponse::Error(
+                        "El servidor cerró la conexión inesperadamente".to_string(),
+                    );
+                }
+            }
+
+            IpcResponse::Ok
         }
         IpcRequest::Discovered => {
             let discovered_devices = state.get_discovered_devices().await;
             let mut devices: Vec<Device> = Vec::new();
             let keys_option = state.storage.get_identity_secret_key().await;
             if keys_option.is_none() {
-                return IpcResponse::Error("No se pudo obtener la clave secreta del dispositivo".to_string());
+                return IpcResponse::Error(
+                    "No se pudo obtener la clave secreta del dispositivo".to_string(),
+                );
             }
             let keys = keys_option.unwrap();
             for device_id in &discovered_devices {
                 if state.storage.has_contact(device_id).await {
-                    let contact = state.storage.get_contact(device_id).await.unwrap();        
+                    let contact = state.storage.get_contact(device_id).await.unwrap();
                     let code = keys.sign(&contact.public_key);
-                    let url = format!("http://{}/info/{}/{}", state.get_device_value(device_id).await.unwrap(), state.storage.get_identity_device_id().await.unwrap_or_else(|| "".into()), &String::from_utf8_lossy(&code));
+                    let url = format!(
+                        "http://{}/info/{}/{}",
+                        state.get_device_value(device_id).await.unwrap(),
+                        state
+                            .storage
+                            .get_identity_device_id()
+                            .await
+                            .unwrap_or_else(|| "".into()),
+                        &String::from_utf8_lossy(&code)
+                    );
                     let response = reqwest::get(url).await;
                     match response {
                         Ok(resp) => {
@@ -88,21 +259,23 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                 match resp.json::<serde_json::Value>().await {
                                     Ok(device_info) => {
                                         devices.push(Device {
-                                            device_name: device_info.get("device_name")
+                                            device_name: device_info
+                                                .get("device_name")
                                                 .and_then(|info| info.as_str())
                                                 .unwrap_or("Desconocido")
                                                 .to_string(),
-                                            device_id: device_info.get("device_id")
+                                            device_id: device_info
+                                                .get("device_id")
                                                 .and_then(|info| info.as_str())
                                                 .unwrap_or("Desconocido")
                                                 .to_string(),
-                                            device_image: device_info.get("device_image")
+                                            device_image: device_info
+                                                .get("device_image")
                                                 .and_then(|info| info.as_str())
                                                 .unwrap_or("Desconocido")
                                                 .to_string(),
                                         });
-
-                                }
+                                    }
                                     Err(_) => todo!(),
                                 }
                             } else {
@@ -113,8 +286,11 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                             println!("Error al realizar la solicitud HTTP: {}", e);
                         }
                     }
-                }else{
-                    let url = format!("http://{}/info/-/-", state.get_device_value(device_id).await.unwrap());
+                } else {
+                    let url = format!(
+                        "http://{}/info/-/-",
+                        state.get_device_value(device_id).await.unwrap()
+                    );
                     let response = reqwest::get(url).await;
                     match response {
                         Ok(resp) => {
@@ -152,13 +328,10 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                             println!("Error al realizar la solicitud HTTP: {}", e);
                         }
                     }
-
                 }
-            }   
+            }
             IpcResponse::Discovered(devices)
-
-        }
-        // IpcRequest::GetVinculedKey => {
+        } // IpcRequest::GetVinculedKey => {
           //     // 1. Extraer la clave en un bloque cerrado
           //     let cached_key = {
           //         let guard = state.vinculed_key.read().await;

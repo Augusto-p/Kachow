@@ -13,10 +13,6 @@ pub struct Contact {
     pub display_name: String,
     pub public_key: Vec<u8>,
     pub device_image: Vec<u8>,
-    pub last_seen_ip: Option<String>,
-    pub last_seen_port: Option<u16>,
-    pub last_seen_timestamp: Option<i64>,
-    pub trust_level: String,
 }
 
 #[derive(Debug, Clone)]
@@ -26,7 +22,7 @@ pub struct ContactAddress {
 }
 
 impl Database {
-    /// Inserta un nuevo contacto o actualiza sus datos si ya existe (upsert)
+    /// Inserta o actualiza un contacto en la base de datos (Upsert)
     pub async fn set_contact(&self, contact: &Contact) -> bool {
         let conn = Arc::clone(&self.conn);
         let contact = contact.clone();
@@ -36,28 +32,19 @@ impl Database {
 
             conn.execute(
                 "INSERT INTO contacts (
-                    device_id, secret_service_name, display_name, public_key, device_image,
-                    last_seen_ip, last_seen_port, last_seen_timestamp, trust_level
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                    device_id, secret_service_name, display_name, public_key, device_image
+                ) VALUES (?1, ?2, ?3, ?4, ?5)
                 ON CONFLICT(device_id) DO UPDATE SET
                     secret_service_name = excluded.secret_service_name,
                     display_name = excluded.display_name,
                     public_key = excluded.public_key,
-                    device_image = excluded.device_image,
-                    last_seen_ip = excluded.last_seen_ip,
-                    last_seen_port = excluded.last_seen_port,
-                    last_seen_timestamp = excluded.last_seen_timestamp,
-                    trust_level = excluded.trust_level",
+                    device_image = excluded.device_image",
                 params![
                     contact.device_id,
                     contact.secret_service_name,
                     contact.display_name,
                     contact.public_key,
                     contact.device_image,
-                    contact.last_seen_ip,
-                    contact.last_seen_port.map(|p| p as i32),
-                    contact.last_seen_timestamp,
-                    contact.trust_level,
                 ],
             )
             .ok()
@@ -65,6 +52,54 @@ impl Database {
         .await;
 
         result.ok().flatten().is_some()
+    }
+
+    /// Obtiene un contacto completo según su device_id
+    pub async fn get_contact(&self, device_id: &str) -> Option<Contact> {
+        let conn = Arc::clone(&self.conn);
+        let device_id = device_id.to_string();
+
+        let result = task::spawn_blocking(move || {
+            let conn = conn.lock().ok()?;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT device_id, secret_service_name, display_name, public_key, device_image 
+                     FROM contacts WHERE device_id = ?1",
+                )
+                .ok()?;
+
+            stmt.query_row(params![device_id], |row| {
+                Ok(Contact {
+                    device_id: row.get(0)?,
+                    secret_service_name: row.get(1)?,
+                    display_name: row.get(2)?,
+                    public_key: row.get(3)?,
+                    device_image: row.get(4)?,
+                })
+            })
+            .ok()
+        })
+        .await;
+
+        result.ok().flatten()
+    }
+
+    /// Comprueba si existe un contacto por su device_id
+    pub async fn has_contact(&self, device_id: &str) -> bool {
+        let conn = Arc::clone(&self.conn);
+        let device_id = device_id.to_string();
+
+        let result = task::spawn_blocking(move || {
+            let conn = conn.lock().ok()?;
+            let mut stmt = conn
+                .prepare("SELECT EXISTS(SELECT 1 FROM contacts WHERE device_id = ?1)")
+                .ok()?;
+            stmt.query_row(params![device_id], |row| row.get::<_, bool>(0))
+                .ok()
+        })
+        .await;
+
+        result.ok().flatten().unwrap_or(false)
     }
 
     /// Elimina un contacto por su device_id
@@ -75,35 +110,9 @@ impl Database {
         let result = task::spawn_blocking(move || {
             let conn = conn.lock().ok()?;
             let rows = conn
-                .execute("DELETE FROM contacts WHERE device_id = ?1", params![device_id])
-                .ok()?;
-            Some(rows > 0)
-        })
-        .await;
-
-        result.ok().flatten().unwrap_or(false)
-    }
-
-    /// Actualiza el estado de presencia (IP, Puerto, Timestamp)
-pub async fn update_contact_presence(
-        &self,
-        device_id: &str,
-        ip: Option<&str>,
-        port: Option<u16>,
-        timestamp: i64,
-    ) -> bool {
-        let conn = Arc::clone(&self.conn);
-        let device_id = device_id.to_string();
-        let ip = ip.map(|s| s.to_string());
-
-        let result = task::spawn_blocking(move || {
-            let conn = conn.lock().ok()?;
-            let rows = conn
                 .execute(
-                    "UPDATE contacts 
-                     SET last_seen_ip = ?1, last_seen_port = ?2, last_seen_timestamp = ?3 
-                     WHERE device_id = ?4",
-                    params![ip, port.map(|p| p as i32), timestamp, device_id],
+                    "DELETE FROM contacts WHERE device_id = ?1",
+                    params![device_id],
                 )
                 .ok()?;
             Some(rows > 0)
@@ -121,25 +130,19 @@ pub async fn update_contact_presence(
             let conn = conn.lock().ok()?;
             let mut stmt = conn
                 .prepare(
-                    "SELECT device_id, secret_service_name, display_name, public_key, 
-                            device_image, last_seen_ip, last_seen_port, last_seen_timestamp, trust_level 
+                    "SELECT device_id, secret_service_name, display_name, public_key, device_image 
                      FROM contacts",
                 )
                 .ok()?;
 
             let rows = stmt
                 .query_map([], |row| {
-                    let port_i32: Option<i32> = row.get(6)?;
                     Ok(Contact {
                         device_id: row.get(0)?,
                         secret_service_name: row.get(1)?,
                         display_name: row.get(2)?,
                         public_key: row.get(3)?,
                         device_image: row.get(4)?,
-                        last_seen_ip: row.get(5)?,
-                        last_seen_port: port_i32.map(|p| p as u16),
-                        last_seen_timestamp: row.get(7)?,
-                        trust_level: row.get(8)?,
                     })
                 })
                 .ok()?;
@@ -155,7 +158,7 @@ pub async fn update_contact_presence(
         result.ok().flatten().unwrap_or_default()
     }
 
-    /// Obtiene únicamente la lista de `device_id` junto a su `secret_service_name`
+    /// Obtiene todos los secret_service_name junto a su device_id
     pub async fn get_all_contact_addresses(&self) -> Vec<ContactAddress> {
         let conn = Arc::clone(&self.conn);
 
@@ -185,7 +188,7 @@ pub async fn update_contact_presence(
         result.ok().flatten().unwrap_or_default()
     }
 
-    /// Obtiene el display_name de un contacto por device_id
+    /// Consultas de campos individuales
     pub async fn get_contact_display_name(&self, device_id: &str) -> Option<String> {
         self.query_contact_single_field(
             "SELECT display_name FROM contacts WHERE device_id = ?1",
@@ -194,7 +197,22 @@ pub async fn update_contact_presence(
         .await
     }
 
-    /// Obtiene la imagen de un contacto en formato Base64 por device_id
+    pub async fn get_contact_secret_service_name(&self, device_id: &str) -> Option<String> {
+        self.query_contact_single_field(
+            "SELECT secret_service_name FROM contacts WHERE device_id = ?1",
+            device_id,
+        )
+        .await
+    }
+
+    pub async fn get_contact_public_key(&self, device_id: &str) -> Option<Vec<u8>> {
+        self.query_contact_single_field(
+            "SELECT public_key FROM contacts WHERE device_id = ?1",
+            device_id,
+        )
+        .await
+    }
+
     pub async fn get_contact_device_image(&self, device_id: &str) -> Option<String> {
         if let Some(image_bytes) = self
             .query_contact_single_field::<Vec<u8>>(
@@ -208,25 +226,7 @@ pub async fn update_contact_presence(
         None
     }
 
-    /// Obtiene la clave pública de un contacto en bytes por device_id
-    pub async fn get_contact_public_key(&self, device_id: &str) -> Option<Vec<u8>> {
-        self.query_contact_single_field(
-            "SELECT public_key FROM contacts WHERE device_id = ?1",
-            device_id,
-        )
-        .await
-    }
-
-    /// Obtiene el secret_service_name de un contacto por device_id
-    pub async fn get_contact_secret_service_name(&self, device_id: &str) -> Option<String> {
-        self.query_contact_single_field(
-            "SELECT secret_service_name FROM contacts WHERE device_id = ?1",
-            device_id,
-        )
-        .await
-    }
-
-    //  Auxiliar interno para obtener un campo individual filtrando por device_id
+    /// Auxiliar interno para obtener un campo individual por device_id
     async fn query_contact_single_field<T>(&self, query: &'static str, device_id: &str) -> Option<T>
     where
         T: rusqlite::types::FromSql + Send + 'static,
@@ -244,55 +244,45 @@ pub async fn update_contact_presence(
         result.ok().flatten()
     }
 
-    pub async fn has_contact(&self, device_id: &str) -> bool {
+    /// Actualiza únicamente el nombre visible (display_name) de un contacto
+    pub async fn update_contact_display_name(&self, device_id: &str, display_name: &str) -> bool {
+        let display_name = display_name.to_string();
+        self.execute_contact_update(
+            "UPDATE contacts SET display_name = ?1 WHERE device_id = ?2",
+            display_name,
+            device_id,
+        )
+        .await
+    }
+
+    /// Actualiza únicamente la imagen (device_image) de un contacto
+    pub async fn update_contact_device_image(&self, device_id: &str, image: &[u8]) -> bool {
+        let image = image.to_vec();
+        self.execute_contact_update(
+            "UPDATE contacts SET device_image = ?1 WHERE device_id = ?2",
+            image,
+            device_id,
+        )
+        .await
+    }
+
+    /// Función auxiliar interna para ejecutar sentencias UPDATE sobre un contacto específico
+    async fn execute_contact_update(
+        &self,
+        query: &'static str,
+        value: impl rusqlite::ToSql + Send + 'static,
+        device_id: &str,
+    ) -> bool {
         let conn = Arc::clone(&self.conn);
         let device_id = device_id.to_string();
 
         let result = task::spawn_blocking(move || {
             let conn = conn.lock().ok()?;
-            let mut stmt = conn
-                .prepare("SELECT EXISTS(SELECT 1 FROM contacts WHERE device_id = ?1)")
-                .ok()?;
-            stmt.query_row(params![device_id], |row| row.get::<_, bool>(0))
-                .ok()
+            let rows_affected = conn.execute(query, params![value, device_id]).ok()?;
+            Some(rows_affected > 0)
         })
         .await;
 
         result.ok().flatten().unwrap_or(false)
     }
-    /// Obtiene un contacto completo según su device_id
-    pub async fn get_contact(&self, device_id: &str) -> Option<Contact> {
-        let conn = Arc::clone(&self.conn);
-        let device_id = device_id.to_string();
-
-        let result = task::spawn_blocking(move || {
-            let conn = conn.lock().ok()?;
-            let mut stmt = conn
-                .prepare(
-                    "SELECT device_id, secret_service_name, display_name, public_key, 
-                            device_image, last_seen_ip, last_seen_port, last_seen_timestamp, trust_level 
-                     FROM contacts WHERE device_id = ?1",
-                )
-                .ok()?;
-
-            stmt.query_row(params![device_id], |row| {
-                let port_i32: Option<i32> = row.get(6)?;
-                Ok(Contact {
-                    device_id: row.get(0)?,
-                    secret_service_name: row.get(1)?,
-                    display_name: row.get(2)?,
-                    public_key: row.get(3)?,
-                    device_image: row.get(4)?,
-                    last_seen_ip: row.get(5)?,
-                    last_seen_port: port_i32.map(|p| p as u16),
-                    last_seen_timestamp: row.get(7)?,
-                    trust_level: row.get(8)?,
-                })
-            })
-            .ok()
-        })
-        .await;
-
-        result.ok().flatten()
-    }
- }
+}

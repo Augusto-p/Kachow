@@ -44,11 +44,7 @@ impl Database{
                 secret_service_name TEXT NOT NULL,
                 display_name TEXT NOT NULL,
                 public_key BLOB NOT NULL,
-                device_image BLOB NOT NULL,
-                last_seen_ip TEXT,
-                last_seen_port INTEGER,
-                last_seen_timestamp INTEGER,
-                trust_level TEXT NOT NULL
+                device_image BLOB NOT NULL
             );
             "
         )?;
