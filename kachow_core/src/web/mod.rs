@@ -168,10 +168,15 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
 
             // Paso B: Recibir Kachow-Gama cifrado asimétricamente
             if let Ok(pair_response) = serde_json::from_str::<EncryptedDataPayload>(&payload_json) {
+                println!("Gama 0");
                 let secret_key = state.storage.get_identity_secret_key().await.unwrap();
+                println!("Gama 1");
                 if let Ok(data_original) = secret_key.decrypt(&pair_response) {
+                    println!("Gama 2");
                     if let Ok(json_payload) = serde_json::from_str::<serde_json::Value>(&data_original) {
+                        println!("Gama 3");
                         if json_payload["Name"] == "Kachow-Gama" || json_payload["public_key"].is_string() {
+                            println!("Gama 4");
                             let _ = state.storage.set_contact(&Contact {
                                 device_id: json_payload["device_id"].as_str().unwrap_or_default().to_string(),
                                 secret_service_name: json_payload["secret_service_name"].as_str().unwrap_or_default().to_string(),
@@ -182,8 +187,10 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
                                 display_name: json_payload["display_name"].as_str().unwrap_or_default().to_string(),
                                 public_key: json_payload["public_key"].as_str().unwrap_or_default().as_bytes().to_vec(),
                             }).await;
+                            println!("Gama 5");
 
                             let _ = socket.send(Message::Text("Save".into())).await;
+                            println!("Gama 6");
                             break; // Cierra la conexión después de guardar
                         }
                     }

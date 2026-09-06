@@ -1,7 +1,12 @@
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    crypto::pair::{EncryptedPayload, PairCrypt}, database::contacts::Contact, identity::keys::{EncryptedDataPayload, IdentityKeyPair}, mdns::MdnsManager, state::KachowState, web::KachowPair,
+    crypto::pair::{EncryptedPayload, PairCrypt},
+    database::contacts::Contact,
+    identity::keys::{EncryptedDataPayload, IdentityKeyPair},
+    mdns::MdnsManager,
+    state::KachowState,
+    web::KachowPair,
 };
 use futures_util::{SinkExt, StreamExt};
 use kachow_ipc::ipc::structs::{Device, DeviceInfo, IpcRequest, IpcResponse};
@@ -146,12 +151,17 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
 
                             println!("Respuesta de emparejamiento recibida: {:?}", json_payload);
                             if json_payload["name"] == "Kachow-Beta" {
-                                let public_key =
-                                    json_payload["public_key"].as_str().unwrap_or_default();
-                                println!("Device ID: {}", json_payload["device_id"]);
-                                println!("Display Name {}", json_payload["secret_service_name"]);
+                                let public_key: Vec<u8> = json_payload["public_key"]
+                                    .as_array()
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|v| v.as_u64().map(|n| n as u8))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                
 
-
+                                
                                 let _ = state
                                     .storage
                                     .set_contact(&Contact {
@@ -159,7 +169,9 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                             .as_str()
                                             .unwrap_or_default()
                                             .to_string(),
-                                        secret_service_name: MdnsManager::normalize_service_type(json_payload["secret_service_name"].as_str().unwrap()),
+                                        secret_service_name: MdnsManager::normalize_service_type(
+                                            json_payload["secret_service_name"].as_str().unwrap(),
+                                        ),
                                         device_image: json_payload["device_image"]
                                             .as_array()
                                             .unwrap_or(&vec![])
@@ -170,7 +182,7 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                             .as_str()
                                             .unwrap_or_default()
                                             .to_string(),
-                                        public_key: public_key.as_bytes().to_vec(),
+                                        public_key: public_key.clone(),
                                     })
                                     .await;
 
@@ -201,7 +213,7 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
 
                                 let data_str = serde_json::to_string(&data_me).unwrap();
                                 let encrypted_response =
-                                    IdentityKeyPair::encrypt_for_recipient(&data_str, public_key)
+                                    IdentityKeyPair::encrypt_for_recipient(&data_str, &hex::encode(public_key))
                                         .map_err(|err| IpcResponse::Error(err.to_string()));
                                 let json_out = serde_json::to_string(&encrypted_response).unwrap();
                                 println!("Enviando confirmación Gama al servidor...");
