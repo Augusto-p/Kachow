@@ -1,6 +1,4 @@
-use std::{ops::ControlFlow::Break, sync::Arc};
-
-use aes_gcm::aead::Payload;
+use std::{ sync::Arc};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -11,10 +9,8 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::error::Category::Data;
-
 use crate::{
-    crypto::pair::{EncryptedPayload, PairCrypt}, database::{contacts::Contact, identity}, identity::keys::{EncryptedDataPayload, IdentityKeyPair}, mdns::MdnsManager, state::KachowState,
+    crypto::pair::{EncryptedPayload, PairCrypt}, database::{contacts::Contact}, identity::keys::{EncryptedDataPayload, IdentityKeyPair}, mdns::MdnsManager, state::KachowState,
 };
 
 pub struct WEB;
@@ -136,7 +132,7 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
             if let Ok(pair_payload) = serde_json::from_str::<EncryptedPayload>(&payload_json) {
                 let payload_data = match PairCrypt::desencriptar(&pair_payload, &state.pair_key.get_key().unwrap()) {
                     Ok(data) => data,
-                    Err(_) => continue,
+                    Err(_) => break,
                 };
 
                 let json_payload: serde_json::Value = match serde_json::from_str(&payload_data) {
@@ -171,12 +167,10 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
                 let secret_key = state.storage.get_identity_secret_key().await.unwrap();
                 if let Ok(data_original) = secret_key.decrypt(&pair_response) {
                     if let Ok(json_payload) = serde_json::from_str::<serde_json::Value>(&data_original) {
-                        println!("Gama 3");
                         if json_payload["name"] == "Kachow-Gama"{
-                            println!("Gama 4");
                             let _ = state.storage.set_contact(&Contact {
                                 device_id: json_payload["device_id"].as_str().unwrap_or_default().to_string(),
-                                secret_service_name: json_payload["secret_service_name"].as_str().unwrap_or_default().to_string(),
+                                secret_service_name: MdnsManager::normalize_service_type(&json_payload["secret_service_name"].as_str().unwrap_or_default().to_string()),
                                 device_image: json_payload["device_image"].as_array().unwrap_or(&vec![])
                                     .iter()
                                     .map(|v| v.as_u64().unwrap_or(0) as u8)
@@ -190,10 +184,7 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
                                     })
                                     .unwrap_or_default(),
                             }).await;
-                            println!("Gama 5");
-
                             let _ = socket.send(Message::Text("Save".into())).await;
-                            println!("Gama 6");
                             break; // Cierra la conexión después de guardar
                         }
                     }

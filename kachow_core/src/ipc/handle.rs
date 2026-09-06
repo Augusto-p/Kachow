@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    crypto::pair::{EncryptedPayload, PairCrypt},
+    crypto::pair::{PairCrypt},
     database::contacts::Contact,
     identity::keys::{EncryptedDataPayload, IdentityKeyPair},
     mdns::MdnsManager,
@@ -67,10 +67,6 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
             target_id,
             pair_code,
         } => {
-            println!(
-                "Solicitud de emparejamiento recibida: target_id={}, pair_code={}",
-                target_id, pair_code
-            );
             let identity = match state.storage.get_identity().await {
                 Some(id) => id,
                 None => {
@@ -103,14 +99,10 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                 };
 
             let url = format!("ws://{}/pair/{}", mdns_name, identity.device_id);
-            println!("Conectando a {url}...");
-
             let (ws_stream, _) = match connect_async(&url).await {
                 Ok(conn) => conn,
                 Err(e) => return IpcResponse::Error(format!("Error al conectar WebSocket: {e}")),
             };
-
-            println!("Conexión WebSocket establecida.");
             let (mut write, mut read) = ws_stream.split();
 
             while let Some(msg_result) = read.next().await {
@@ -122,12 +114,9 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                 };
 
                 if let Message::Text(text) = msg {
-                    println!("Mensaje recibido del servidor: {text}");
-
                     if text == "Save" {
                         return IpcResponse::Ok;
                     } else if text == "Ready" {
-                        println!("Enviando public_key_crypto al servidor...");
                         let payload = match serde_json::to_string(&public_key_crypto) {
                             Ok(json) => json,
                             Err(e) => {
@@ -149,7 +138,6 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                 serde_json::from_str(&data_original)
                                     .expect("Error al deserializar el payload de emparejamiento");
 
-                            println!("Respuesta de emparejamiento recibida: {:?}", json_payload);
                             if json_payload["name"] == "Kachow-Beta" {
                                 let public_key: Vec<u8> = json_payload["public_key"]
                                     .as_array()
@@ -159,8 +147,6 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                             .collect()
                                     })
                                     .unwrap_or_default();
-                                
-
                                 
                                 let _ = state
                                     .storage
@@ -216,13 +202,11 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                     IdentityKeyPair::encrypt_for_recipient(&data_str, &hex::encode(public_key))
                                         .map_err(|err| IpcResponse::Error(err.to_string())).unwrap();
                                 let json_out = serde_json::to_string(&encrypted_response).unwrap();
-                                println!("Enviando confirmación Gama al servidor...");
                                 if let Err(e) = write.send(Message::Text(json_out)).await {
                                     return IpcResponse::Error(format!(
                                         "Error al enviar confirmación Gama: {e}"
                                     ));
                                 }
-                                // return IpcResponse::Ok;
                             } else {
                                 return IpcResponse::Error(
                                     "Respuesta de emparejamiento inválida".to_string(),

@@ -103,9 +103,9 @@ impl MdnsManager {
 
                             // 2. Comprobar si empieza por "kachow-"
                             if let Some(device_id) = lower_instance.strip_prefix("kachow-") {
-                                // if device_id == device_id_me {
-                                //     continue; // Ignorar nuestro propio anuncio
-                                // }
+                                if device_id == device_id_me {
+                                    continue; // Ignorar nuestro propio anuncio
+                                }
                                 if !device_id.is_empty() {
                                     println!(
                                         "🔎 [Encontrado - {}] Device ID: '{}' | Host: {}:{}",
