@@ -181,8 +181,14 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
                                     .iter()
                                     .map(|v| v.as_u64().unwrap_or(0) as u8)
                                     .collect::<Vec<u8>>(),
-                                display_name: json_payload["display_name"].as_str().unwrap_or_default().to_string(),
-                                public_key: json_payload["public_key"].as_str().unwrap_or_default().as_bytes().to_vec(),
+                                display_name: json_payload["device_name"].as_str().unwrap_or_default().to_string(),
+                                public_key: json_payload["public_key"].as_array()
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|v| v.as_u64().map(|n| n as u8))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
                             }).await;
                             println!("Gama 5");
 
