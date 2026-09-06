@@ -148,7 +148,9 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                             if json_payload["name"] == "Kachow-Beta" {
                                 let public_key =
                                     json_payload["public_key"].as_str().unwrap_or_default();
-                                println!("Emparejamiento exitoso con Kachow-Beta. Public Key: {public_key}");
+                                println!("Device ID: {}", json_payload["device_id"]);
+                                println!("Display Name {}", json_payload["secret_service_name"]);
+
 
                                 let _ = state
                                     .storage
@@ -157,17 +159,14 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                             .as_str()
                                             .unwrap_or_default()
                                             .to_string(),
-                                        secret_service_name: MdnsManager::normalize_service_type(&json_payload["secret_service_name"]
-                                            .as_str()
-                                            .unwrap_or_default()
-                                            .to_string()),
+                                        secret_service_name: MdnsManager::normalize_service_type(json_payload["secret_service_name"].as_str().unwrap()),
                                         device_image: json_payload["device_image"]
                                             .as_array()
                                             .unwrap_or(&vec![])
                                             .iter()
                                             .map(|v| v.as_u64().unwrap_or(0) as u8)
                                             .collect::<Vec<u8>>(),
-                                        display_name: json_payload["display_name"]
+                                        display_name: json_payload["device_name"]
                                             .as_str()
                                             .unwrap_or_default()
                                             .to_string(),
@@ -211,6 +210,7 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                         "Error al enviar confirmación Gama: {e}"
                                     ));
                                 }
+                                return IpcResponse::Ok;
                             } else {
                                 return IpcResponse::Error(
                                     "Respuesta de emparejamiento inválida".to_string(),

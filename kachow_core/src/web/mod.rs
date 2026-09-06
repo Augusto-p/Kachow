@@ -152,10 +152,7 @@ async fn handle_socket(mut socket: WebSocket, _device_id: String, state: Arc<Kac
                     let data_beta = KachowPair {
                         name: "Kachow-Beta".to_string(),
                         public_key: secret_key.verifying_key.as_bytes().to_vec(),
-                        secret_service_name:  MdnsManager::normalize_service_type(&json_payload["secret_service_name"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_string()),
+                        secret_service_name:  MdnsManager::normalize_service_type(&state.storage.get_identity_secret_service_name().await.unwrap_or_default()),
                         device_id: state.storage.get_identity_device_id().await.unwrap_or_else(|| "Unknown".to_string()),
                         device_name: state.storage.get_identity_display_name().await.unwrap_or_else(|| "Unknown".to_string()),
                         device_image: state.storage.get_identity_device_image().await.unwrap_or_default(),
