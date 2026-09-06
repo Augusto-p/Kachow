@@ -214,7 +214,7 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                 let data_str = serde_json::to_string(&data_me).unwrap();
                                 let encrypted_response =
                                     IdentityKeyPair::encrypt_for_recipient(&data_str, &hex::encode(public_key))
-                                        .map_err(|err| IpcResponse::Error(err.to_string()));
+                                        .map_err(|err| IpcResponse::Error(err.to_string())).unwrap();
                                 let json_out = serde_json::to_string(&encrypted_response).unwrap();
                                 println!("Enviando confirmación Gama al servidor...");
                                 if let Err(e) = write.send(Message::Text(json_out)).await {
