@@ -43,6 +43,18 @@ enum Commands {
         files: Vec<PathBuf>,
     },
     Discovered,
+    SetNameDevice {
+        #[arg(short, long)]
+        name: String,
+    },
+    SetImageDevice {
+        #[arg(short, long)]
+        image: String,
+    },
+    SetDownloadFolder {
+        #[arg(short, long)]
+        path: String,
+    },
     // Ping {
     //     #[arg(short, long)]
     //     target: String,
@@ -80,8 +92,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Commands::GetPairCode => match ipc.send(&IpcRequest::GetPairCode).await {
-            Ok(IpcResponse::PairCode(code)) => {
-                println!("Pair Code: {}", code.unwrap());
+            Ok(IpcResponse::PairCode(code, time)) => {
+                println!("Pair Code: {}, ({})", code.unwrap(), time.unwrap());
             }
             Ok(IpcResponse::Error(e)) => {
                 eprintln!("Error devuelto por el demonio: {}", e);
@@ -185,6 +197,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+    
+        Commands::SetNameDevice { name } => {
+            let name_clone = name.clone();
+            match ipc.send(&IpcRequest::SetNameDevice { name }).await {
+            Ok(IpcResponse::Ok) => {
+                println!("Setted {} with device name", name_clone);
+            }
+            Ok(IpcResponse::Error(e)) => {
+                eprintln!("Error devuelto por el demonio: {}", e);
+            }
+            Ok(_) => {
+                println!("Respuesta inesperada del demonio.");
+            }
+            Err(e) => {
+                eprintln!("Error de comunicación IPC (conexión/socket): {}", e);
+            }
+        }},
+        Commands::SetImageDevice { image } => {
+
+            match ipc.send(&IpcRequest::SetImageDevice { image }).await {
+            Ok(IpcResponse::Ok) => {
+                println!("Setted Image Device");
+            }
+            Ok(IpcResponse::Error(e)) => {
+                eprintln!("Error devuelto por el demonio: {}", e);
+            }
+            Ok(_) => {
+                println!("Respuesta inesperada del demonio.");
+            }
+            Err(e) => {
+                eprintln!("Error de comunicación IPC (conexión/socket): {}", e);
+            }
+        }},
+                Commands::SetDownloadFolder { path } => {
+
+            match ipc.send(&IpcRequest::SetDownloadFolder { path }).await {
+            Ok(IpcResponse::Folder(path)) => {
+                println!("Setted Folder {}", path);
+            }
+            Ok(IpcResponse::Error(e)) => {
+                eprintln!("Error devuelto por el demonio: {}", e);
+            }
+            Ok(_) => {
+                println!("Respuesta inesperada del demonio.");
+            }
+            Err(e) => {
+                eprintln!("Error de comunicación IPC (conexión/socket): {}", e);
+            }
+        }},
+
     }
+
     Ok(())
 }

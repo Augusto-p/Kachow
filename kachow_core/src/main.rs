@@ -8,7 +8,10 @@ mod utils;
 mod web;
 use std::{sync::Arc, time::Duration};
 
-use axum::{Router, routing::{get, post}};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use kachow_ipc::ipc::server::IpcServer;
 use tokio::time::sleep;
 
@@ -44,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/pair/{device_id}", get(WEB::pair))
         .route("/info/{device_id}/{code}", get(WEB::info))
+        .route("/receive/{device_id}", post(WEB::receive))
         .with_state(web_state);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", tcp_port)).await?;
@@ -93,20 +97,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // (Ajusta la llamada a la función/campo real de `KachowState` si varía)
             let is_mode_active = mdns_state.is_mode_active();
 
-            let instance_name = if is_mode_active {
-                &("kachow-".to_string()
+            if is_mode_active {
+                let public_instance = &("kachow-".to_string()
                     + &mdns_state
                         .storage
                         .get_identity_device_id()
                         .await
-                        .unwrap_or_else(|| "".into()))
-            } else {
-                &mdns_state
-                    .storage
-                    .get_identity_secret_service_name()
-                    .await
-                    .unwrap_or_else(|| "".into())
+                        .unwrap_or_else(|| "".into()));
+                if let Err(err) = mdns_manager.announce(public_instance) {
+                    eprintln!("Error al anunciar mDNS: {}", err);
+                };
             };
+            let instance_name = &mdns_state
+                .storage
+                .get_identity_secret_service_name()
+                .await
+                .unwrap_or_else(|| "".into());
 
             if let Err(err) = mdns_manager.announce(instance_name) {
                 eprintln!("Error al anunciar mDNS: {}", err);

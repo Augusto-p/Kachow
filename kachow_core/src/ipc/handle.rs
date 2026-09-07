@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    crypto::pair::{PairCrypt},
+    crypto::{files::CryptoManager, pair::PairCrypt},
     database::contacts::Contact,
     identity::keys::{EncryptedDataPayload, IdentityKeyPair},
     mdns::MdnsManager,
@@ -24,13 +24,38 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                 device_id: identity.device_id,
                 tcp_port: identity.tcp_port,
                 download_dir: identity.download_dir,
-                device_image: "Soy una Imagen".to_string(),
+                device_image: str::from_utf8(&identity.device_image)
+                    .unwrap_or("")
+                    .to_string(),
             };
             return IpcResponse::Info(info);
         }
 
         IpcRequest::SetModePrivate => {
             state.change_mode(false).await;
+            return IpcResponse::Ok;
+        }
+
+        IpcRequest::SetNameDevice { name } => {
+            state.storage.set_identity_display_name(&name).await;
+            return IpcResponse::Ok;
+        }
+        IpcRequest::SetDownloadFolder { mut path } => {
+            state.storage.set_identity_download_dir(&path).await;
+            if let Some(home) = dirs::home_dir() {
+                if let Some(home_str) = home.to_str() {
+                    path = path.replace(home_str, "~");
+                }
+            }
+            return IpcResponse::Folder(path);
+        }
+
+        IpcRequest::SetImageDevice { image } => {
+            let a = state
+                .storage
+                .set_identity_device_image(image.as_bytes())
+                .await;
+            println!("{}", a);
             return IpcResponse::Ok;
         }
 
@@ -41,7 +66,7 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
 
         IpcRequest::GetPairCode => {
             if state.is_mode_active() {
-                return IpcResponse::PairCode(state.pair_key.get_key());
+                return IpcResponse::PairCode(state.pair_key.get_key(), state.pair_key.get_time());
             }
             return IpcResponse::Error("Private Mode".to_string());
         }
@@ -50,15 +75,61 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
             target_id,
             files_paths,
         } => {
-            // hacer ping a target_id para verificar que está en línea antes de enviar los archivos
-            println!(
-                "Solicitud de envío de archivos recibida: target_id={}",
-                target_id
-            );
-
             let path_buf_files: Vec<PathBuf> = files_paths.into_iter().map(PathBuf::from).collect();
-            for file in &path_buf_files {
-                println!("Archivo a enviar: {}", file.display());
+            let my_keys = state.storage.get_identity_secret_key().await.expect("");
+            if let Some(public_key_pem) = state.storage.get_contact_public_key(&target_id).await {
+                match CryptoManager::pack_compress_encrypt_and_sign(
+                    &path_buf_files,
+                    &public_key_pem,
+                    &my_keys,
+                ) {
+                    Ok(bytes) => {
+                        println!("Éxito al empaquetar, tamaño: {} bytes", bytes.len());
+
+                        // 1. Instanciar el cliente de reqwest
+                        let client = reqwest::Client::new();
+
+                        // 2. Definir la URL de destino (por ejemplo, el endpoint del otro dispositivo)
+                        let target_url = format!(
+                            "https://{}/receive/{}",
+                            state
+                                .storage
+                                .get_contact_secret_service_name(&target_id)
+                                .await
+                                .unwrap(),
+                            my_keys.device_id()
+                        );
+
+                        // 3. Enviar la petición POST asíncrona
+                        match client
+                            .post(&target_url)
+                            .header("Content-Type", "application/json") // O "application/octet-stream" si envías el buffer raw
+                            .body(bytes)
+                            .send()
+                            .await
+                        {
+                            Ok(response) => {
+                                if response.status().is_success() {
+                                    println!(
+                                        "Petición enviada correctamente. Status: {}",
+                                        response.status()
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "El servidor respondió con error: {}",
+                                        response.status()
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("Error al realizar la petición HTTP POST: {:?}", err);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("Error al procesar los archivos: {:?}", err);
+                    }
+                }
             }
 
             return IpcResponse::Ok;
@@ -147,7 +218,7 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                             .collect()
                                     })
                                     .unwrap_or_default();
-                                
+
                                 let _ = state
                                     .storage
                                     .set_contact(&Contact {
@@ -198,9 +269,12 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                 };
 
                                 let data_str = serde_json::to_string(&data_me).unwrap();
-                                let encrypted_response =
-                                    IdentityKeyPair::encrypt_for_recipient(&data_str, &hex::encode(public_key))
-                                        .map_err(|err| IpcResponse::Error(err.to_string())).unwrap();
+                                let encrypted_response = IdentityKeyPair::encrypt_for_recipient(
+                                    &data_str,
+                                    &hex::encode(public_key),
+                                )
+                                .map_err(|err| IpcResponse::Error(err.to_string()))
+                                .unwrap();
                                 let json_out = serde_json::to_string(&encrypted_response).unwrap();
                                 if let Err(e) = write.send(Message::Text(json_out)).await {
                                     return IpcResponse::Error(format!(

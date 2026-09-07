@@ -4,6 +4,7 @@ members = [
     "kachow_core",
     "kachow_cli",
     "kachow_ipc",
+    "kachow_gui/src-tauri"
 ]
 
 [workspace.package]

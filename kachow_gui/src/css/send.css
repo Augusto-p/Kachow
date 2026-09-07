@@ -1,0 +1,145 @@
+section#SEND .discover{
+    grid-column: 1;
+    grid-row: 1;
+    background-color: var(--mcqueen-dark-border);
+    width: 100%;
+    height: 100%;
+    border-radius: 4vh;
+    overflow-y: scroll;
+    overflow-x: hidden;
+    box-sizing: border-box;
+    position: relative;
+    padding: 4vw;
+    display: grid;
+    grid-template-columns: repeat(4,20vw);
+    grid-auto-rows: 10vh;
+    column-gap: 2vw;
+    row-gap: 2vw;
+    border: 2px solid var(--mcqueen-body-red);
+    
+}
+
+section#SEND .discover::-webkit-scrollbar-track {
+    
+    margin-top: 1.5vh;
+    margin-bottom: 1.5vh;
+}
+
+
+section#SEND .discover button{
+    cursor: pointer;
+    padding: 1vw;
+    margin: 0;
+    border: none;
+    outline: none;
+    display: grid;
+    grid-template-columns: 100%;
+    grid-template-rows: 75% 25%;
+    align-items: center;
+    justify-items: center;
+    width: 100%;
+    font-weight: 700;
+    border-radius: 1vh;
+    font-size: 1rem;
+    row-gap: .5vh;
+    color: var(--mcqueen-yellow);
+    background-color: transparent;
+    transition: all 1s;
+    user-select: none;
+}
+section#SEND .discover button:hover{
+    background-color: var(--mcqueen-dark-base);
+    border: 1px solid var(--mcqueen-body-red);
+}
+
+section#SEND .discover button .img{
+    width: 7vh;
+    height: 7vh;
+    border-radius: 50vh;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+section#SEND .discover button span{
+    width: 18vw;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+section#SEND .files{
+    grid-column: 1;
+    grid-row: 2;
+    background-color: purple;
+    width: 100%;
+    height: 100%;
+    border-radius: 4vh;
+    overflow-x: hidden;
+    overflow-y: scroll;
+    box-sizing: border-box;
+    position: relative;
+    display: grid;
+    grid-template-columns: 100%;
+    grid-auto-rows: 10vh;
+    row-gap: 2vw;
+    padding: 4vw;
+    background-color: var(--mcqueen-dark-border);
+        border: 2px solid var(--mcqueen-body-red);
+}
+section#SEND .files::-webkit-scrollbar-track {
+    
+    margin-top: 2.5vh;
+    margin-bottom: 2.5vh;
+}
+
+section#SEND .file{
+    background-color: transparent;
+    display: grid;
+    grid-template-columns: 10vh 1fr 5vh;
+    padding: 2vw;
+    grid-template-rows: 100%;
+    box-sizing: border-box;
+    position: relative;
+    align-items: center;
+    justify-items: center;
+    fill: var(--mcqueen-yellow);
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--mcqueen-yellow);
+    user-select: none;
+    transition: all 1s;
+    border-radius: 1vh;
+}
+
+section#SEND .file:hover{
+    background-color: var(--mcqueen-dark-base);
+    border: 1px solid var(--mcqueen-body-red);
+}
+section#SEND .file> svg{
+    height: 70%;
+}
+section#SEND .file span{
+    width: 100%;
+    display: inline-block;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+
+}
+
+section#SEND .file button{
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    outline: none;
+    border: none;
+    background-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+
+}
+section#SEND .file button svg{
+    width: 70%;
+    fill: var(--mcqueen-orange);
+}

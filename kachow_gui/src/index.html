@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kachow</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/receive.css">
+    <link rel="stylesheet" href="css/send.css">
+</head>
+<body data-mode="Receive">
+    <div class="device_ID">
+        <span id="DeviceID">DEVICE ID: dacf61f9da35be41</span>
+    </div>
+
+    <div class="profile">
+        <div id="DeviceImage" ">
+            <button id="DeviceImageEdit">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"/></svg>
+                <input type="file" name="DeviceImage" id="DeviceImageInput">
+            </button>
+        </div>
+        <input type="text" name="DeviceName" id="DeviceName" spellcheck="false" 
+  autocorrect="off" 
+  autocapitalize="off" 
+  autocomplete="off">
+
+    </div>
+
+    <section id="SEND">
+        <div class="discover" id="Discover">
+        </div>
+        <div class="files" id="SendFiles">
+            
+        </div>
+
+    </section>
+    <section id="RECEIVE">
+        <div class="floderDownload" id="DonloadFolderBtn">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640H160v400l96-320h684L837-217q-8 26-29.5 41.5T760-160H160Z"/></svg>
+            <span id="DownloadsFolder">~/Descargas/Kachow</span>
+        </div>
+
+        <div class="deviceMode" data-mode="private">
+            <div class="ext" id="DeviceModePrivate">
+                <div class="in">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M40-160v-112q0-34 17.5-62.5T104-378q62-31 126-46.5T360-440q66 0 130 15.5T616-378q29 15 46.5 43.5T680-272v112H40Zm720 0v-120q0-44-24.5-84.5T666-434q51 6 96 20.5t84 35.5q36 20 55 44.5t19 53.5v120H760ZM247-527q-47-47-47-113t47-113q47-47 113-47t113 47q47 47 47 113t-47 113q-47 47-113 47t-113-47Zm466 0q-47 47-113 47-11 0-28-2.5t-28-5.5q27-32 41.5-71t14.5-81q0-42-14.5-81T544-792q14-5 28-6.5t28-1.5q66 0 113 47t47 113q0 66-47 113Z"/></svg>
+                    <span>Contacts</span>
+                </div>
+            </div>
+            <div class="ext" id="DeviceModePublic">
+                <svg viewBox="0 0 220 220" id="PublicModeArc" data-value="-1">
+                    <path stroke-width="0" stroke-linecap="round" style="opacity: 0;"/>
+                    <path d="M 6 110 A 104 104 0 1 0 214 110 A 104 100 0 1 0 6 110 Z" style="opacity: 0;"/>
+
+                </svg>
+                <div class="in">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M324-111.5Q251-143 197-197t-85.5-127Q80-397 80-480t31.5-156Q143-709 197-763t127-85.5Q397-880 480-880t156 31.5Q709-817 763-763t85.5 127Q880-563 880-480t-31.5 156Q817-251 763-197t-127 85.5Q563-80 480-80t-156-31.5ZM440-162v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q41-45 62.5-100.5T800-480q0-98-54.5-179T600-776v16q0 33-23.5 56.5T520-680h-80v80q0 17-11.5 28.5T400-560h-80v80h240q17 0 28.5 11.5T600-440v120h40q26 0 47 15.5t29 40.5Z"/></svg>
+                    <span>Public</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="pair">
+            <div>
+                <span id="PairCode">A87DUN</span>
+                <span class="names">Pair Code</span>
+            </div>
+            <div id="PairQRCode">
+            
+            </div>
+        </div>
+    </section>
+
+    <div class="menu">
+        <div id="MenuSend">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M320-120v-240H120l360-440 360 440H640v240H320Z"/></svg>
+            <span>Send</span>
+        </div>
+        <div id="MenuReceive">
+            <svg xmlns="http://www.w3.org/2000/svg" style="transform: rotateZ(180deg)"  viewBox="0 -960 960 960"><path d="M320-120v-240H120l360-440 360 440H640v240H320Z" /></svg>
+            <span>Receive</span>
+
+        </div>
+    </div>
+    
+    
+</body>
+
+
+<script src="js/main.js"></script>
+<script src="js/send.js"></script>
+<script src="js/receive.js"></script>
+<script src="service/main.js"></script>
+</html>

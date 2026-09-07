@@ -1,81 +1,136 @@
-use aes_gcm::{
-    aead::{AeadInPlace, KeyInit},
-    Aes256Gcm, Nonce,
-};
-use rand::RngCore;
-use rsa::{sha2::Sha256, Oaep, RsaPublicKey};
-use std::fs::File;
-use std::io::{Error, ErrorKind, Result, Write};
-use std::path::PathBuf;
+use base64::engine::general_purpose;
+use base64::Engine as _;
+
+
+use std::io::{Error, ErrorKind, Result};
+use std::path::{Path, PathBuf};
 use tar::Builder as TarBuilder;
 use zstd::stream::write::Encoder as ZstdEncoder;
+
+use crate::identity::keys::{EncryptedDataPayload, IdentityKeyPair};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs::self
+};
+use tar::Archive as TarArchive;
+use zstd::stream::read::Decoder as ZstdDecoder;
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SignedEncryptedPackage {
+    pub encrypted_payload: EncryptedDataPayload, // Datos cifrados para el receptor
+    pub signature_b64: String,                   // Firma digital generada con TU clave privada
+    pub sender_device_id: String,                // Identificador de quien envía
+}
 
 pub struct CryptoManager;
 
 impl CryptoManager {
-    /// Empaqueta, comprime y cifra una lista de archivos directamente en memoria (`Vec<u8>`).
-    pub fn pack_compress_and_encrypt(
+    pub fn pack_compress_encrypt_and_sign(
         files: &[PathBuf],
-        public_key: &RsaPublicKey,
+        recipient_public_key_bytes: &[u8],
+        my_identity: &IdentityKeyPair, // Tu clave privada para firmar
     ) -> Result<Vec<u8>> {
-        // 1. Generar la clave simétrica AES-256 (32 bytes) y el Nonce (12 bytes)
-        let mut aes_key_bytes = [0u8; 32];
-        let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut aes_key_bytes);
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        // 1. Validar la clave pública del destinatario (32 bytes)
+        if recipient_public_key_bytes.len() != 32 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "La clave pública del destinatario debe ser de 32 bytes",
+            ));
+        }
+        let recipient_pk_b64 = general_purpose::STANDARD.encode(recipient_public_key_bytes);
 
-        // 2. Cifrar la clave simétrica con la clave pública RSA del destinatario
-        let padding = Oaep::new::<Sha256>();
-        let encrypted_aes_key = public_key
-            .encrypt(&mut rand::thread_rng(), padding, &aes_key_bytes)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Error cifrando clave RSA: {e}")))?;
-
-        // 3. Crear el buffer de salida final que se mantendrá en RAM
-        let mut final_payload = Vec::new();
-
-        // 4. Escribir Encabezado: [Tamaño Clave RSA (2 bytes)] + [Clave RSA Cifrada] + [Nonce (12 bytes)]
-        let key_len_bytes = (encrypted_aes_key.len() as u16).to_be_bytes();
-        final_payload.write_all(&key_len_bytes)?;
-        final_payload.write_all(&encrypted_aes_key)?;
-        final_payload.write_all(&nonce_bytes)?;
-
-        // 5. Buffer temporal para canalizar TAR -> ZSTD en memoria
-        let mut unencrypted_buffer = Vec::new();
-
+        // 2. Empacar en TAR y comprimir con Zstd
+        let mut compressed_payload = Vec::new();
         {
-            // Tubería en memoria: TarBuilder escribe en ZstdEncoder, que escribe en un Vec<u8>
-            let zstd_encoder = ZstdEncoder::new(&mut unencrypted_buffer, 3)?; // Nivel 3 de compresión
+            let zstd_encoder = ZstdEncoder::new(&mut compressed_payload, 3)?;
             let mut tar_builder = TarBuilder::new(zstd_encoder);
-
             for file_path in files {
                 if file_path.is_file() {
-                    let mut file = File::open(file_path)?;
-                    let filename = file_path
-                        .file_name()
-                        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Nombre de archivo inválido"))?;
-
-                    // Añadir archivo al TAR
-                    tar_builder.append_file(filename, &mut file)?;
+                    // Asigna la ruta dentro del archivo TAR usando solo el nombre del archivo
+                    if let Some(file_name) = file_path.file_name() {
+                        tar_builder.append_path_with_name(file_path, file_name)?;
+                    }
                 }
             }
 
-            // Finalizar empaquetado TAR y compresión ZSTD
             let zstd_stream = tar_builder.into_inner()?;
             zstd_stream.finish()?;
         }
 
-        // 6. Cifrar los datos comprimidos en memoria usando AES-256-GCM
-        let cipher = Aes256Gcm::new_from_slice(&aes_key_bytes)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Error iniciando AES: {e}")))?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        // 3. Cifrar con la clave pública del destinatario
+        let compressed_b64 = general_purpose::STANDARD.encode(&compressed_payload);
+        let encrypted_payload =
+            IdentityKeyPair::encrypt_for_recipient(&compressed_b64, &recipient_pk_b64)
+                .map_err(|e| Error::new(ErrorKind::Other, format!("Error en el cifrado: {e}")))?;
 
-        cipher
-            .encrypt_in_place(nonce, b"", &mut unencrypted_buffer)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Error cifrando datos con AES: {e}")))?;
+        // 4. Firmar con TU clave privada
+        let signature_bytes = my_identity.sign(encrypted_payload.ciphertext_b64.as_bytes());
+        let signature_b64 = general_purpose::STANDARD.encode(signature_bytes);
 
-        // 7. Adjuntar los datos cifrados al payload final
-        final_payload.write_all(&unencrypted_buffer)?;
+        // 5. Empaquetar todo con tu device_id
+        let package = SignedEncryptedPackage {
+            encrypted_payload,
+            signature_b64,
+            sender_device_id: my_identity.device_id(),
+        };
 
-        Ok(final_payload)
+        // 6. Serializar a bytes para enviar por Axum
+        serde_json::to_vec(&package).map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("Error al serializar paquete: {e}"),
+            )
+        })
     }
+
+pub fn decrypt_unpack_and_verify(
+    package_bytes: &[u8],
+    my_identity: &IdentityKeyPair,
+    sender_public_key_bytes: &[u8],
+    output_dir: &Path,
+) -> Result<()> {
+    // 1. Deserializar el paquete firmado recibido
+    let pkg: SignedEncryptedPackage = serde_json::from_slice(package_bytes)
+        .map_err(|e| Error::new(ErrorKind::InvalidData, format!("JSON inválido: {e}")))?;
+
+    // 2. Verificar la firma usando la clave pública del remitente (Ed25519)
+    let signature_bytes = general_purpose::STANDARD
+        .decode(&pkg.signature_b64)
+        .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Firma Base64 inválida: {e}")))?;
+
+    let is_valid = IdentityKeyPair::valid(
+        sender_public_key_bytes.to_vec(),
+        pkg.encrypted_payload.ciphertext_b64.as_bytes(),
+        &signature_bytes,
+    );
+
+    if !is_valid {
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "Firma digital inválida: el mensaje fue alterado o no proviene del remitente esperado",
+        ));
+    }
+
+    // 3. Descifrar el payload usando nuestra clave privada (SalsaBox / X25519)
+    let compressed_b64 = my_identity
+        .decrypt(&pkg.encrypted_payload)
+        .map_err(|e| Error::new(ErrorKind::Other, format!("Error al descifrar payload: {e}")))?;
+
+    let compressed_bytes = general_purpose::STANDARD
+        .decode(&compressed_b64)
+        .map_err(|e| Error::new(ErrorKind::InvalidData, format!("Base64 comprimido inválido: {e}")))?;
+
+    // 4. Crear el directorio de salida si no existe
+    if !output_dir.exists() {
+        fs::create_dir_all(output_dir)?;
+    }
+
+    // 5. Descomprimir Zstd y desempaquetar TAR directamente hacia la carpeta dada
+    let zstd_decoder = ZstdDecoder::new(&compressed_bytes[..])?;
+    let mut tar_archive = TarArchive::new(zstd_decoder);
+
+    tar_archive.unpack(output_dir)?;
+
+    println!("Archivos desempaquetados con éxito en: {}", output_dir.display());
+    Ok(())
+}
 }

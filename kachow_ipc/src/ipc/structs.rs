@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, string};
 
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,15 @@ pub enum IpcRequest {
         pair_code: String,
     },
     Discovered,
+    SetNameDevice{
+        name: String
+    },
+    SetImageDevice{
+        image: String
+    },
+    SetDownloadFolder{
+        path: String
+    },
 
     // ValidPairCode,
     // GetStatus,
@@ -32,8 +41,9 @@ pub enum IpcResponse {
     Ok,
     Error(String),
     Info(DeviceInfo),
-    PairCode(Option<String>),
+    PairCode(Option<String>, Option<u64>),
     Discovered(Vec<Device>),
+    Folder(String),
     // Status {
     //     running: bool,
     //     active_transfers: usize,
