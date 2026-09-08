@@ -107,16 +107,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Err(err) = mdns_manager.announce(public_instance) {
                     eprintln!("Error al anunciar mDNS: {}", err);
                 };
-            };
-            let instance_name = &mdns_state
+            }else{
+
+                let instance_name = &mdns_state
                 .storage
                 .get_identity_secret_service_name()
                 .await
                 .unwrap_or_else(|| "".into());
-
+            
             if let Err(err) = mdns_manager.announce(instance_name) {
                 eprintln!("Error al anunciar mDNS: {}", err);
             }
+        }
 
             // Esperar 30 segundos antes de la siguiente verificación/re-anuncio
             sleep(Duration::from_secs(5)).await;
