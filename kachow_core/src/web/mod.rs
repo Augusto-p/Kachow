@@ -1,6 +1,14 @@
 use crate::{
-    crypto::{files::CryptoManager, pair::{EncryptedPayload, PairCrypt}}, database::contacts::Contact, identity::keys::{EncryptedDataPayload, IdentityKeyPair}, mdns::MdnsManager, state::KachowState,
+    crypto::{
+        files::CryptoManager,
+        pair::{EncryptedPayload, PairCrypt},
+    },
+    database::contacts::Contact,
+    identity::keys::{EncryptedDataPayload, IdentityKeyPair},
+    mdns::MdnsManager,
+    state::KachowState,
 };
+use axum::body::Bytes;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -12,11 +20,8 @@ use axum::{
 };
 use dirs::download_dir;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use axum::{
-    body::Bytes,
-};
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 pub struct WEB;
 
@@ -209,12 +214,10 @@ impl WEB {
                                             .as_str()
                                             .unwrap_or_default()
                                             .to_string(),
-                                        secret_service_name: MdnsManager::normalize_service_type(
-                                            &json_payload["secret_service_name"]
-                                                .as_str()
-                                                .unwrap_or_default()
-                                                .to_string(),
-                                        ),
+                                        secret_service_name: json_payload["secret_service_name"]
+                                            .as_str()
+                                            .unwrap_or_default()
+                                            .to_string(),
                                         device_image: json_payload["device_image"]
                                             .as_array()
                                             .unwrap_or(&vec![])
@@ -246,57 +249,63 @@ impl WEB {
     }
 
     pub async fn receive(
-    Path(device_id): Path<String>,
-    State(state): State<Arc<KachowState>>,
-    body_bytes: Bytes, // Obtiene los bytes crudos del cuerpo de la petición
-) -> (StatusCode, Json<ApiResponse<Value>>) {
-    // `body` es un buffer de bytes (&[u8] / Bytes)
-    println!("Device ID: {}, Tamaño en bytes: {}", device_id, body_bytes.len());
-    let my_key = state.storage.get_identity_secret_key().await.unwrap();
-    let dir = state.storage.get_identity_download_dir().await.unwrap();
-    let download_dir = std::path::Path::new(&dir);;
-    if let Some(public_key) = state.storage.get_contact_public_key(&device_id).await {
-        return match CryptoManager::decrypt_unpack_and_verify(
-            &body_bytes,
-            &my_key,
-            &public_key,
-            &download_dir,
-        ) {
-            Ok(_) => (
-                StatusCode::OK,
-                Json(ApiResponse {
-                    success: true,
-                    data: json!({ "message": "Archivos descifrados y guardados correctamente" }).into(),
-                    code: 200,
-                    message: "Archivos descifrados y guardados correctamente".to_string(),
-                }),
-            ),
-            Err(err) => {
-                eprintln!("Error al procesar recepción: {:?}", err);
-                return (
-                    StatusCode::BAD_REQUEST,
+        Path(device_id): Path<String>,
+        State(state): State<Arc<KachowState>>,
+        body_bytes: Bytes, // Obtiene los bytes crudos del cuerpo de la petición
+    ) -> (StatusCode, Json<ApiResponse<Value>>) {
+        // `body` es un buffer de bytes (&[u8] / Bytes)
+        println!(
+            "Device ID: {}, Tamaño en bytes: {}",
+            device_id,
+            body_bytes.len()
+        );
+        let my_key = state.storage.get_identity_secret_key().await.unwrap();
+        let dir = state.storage.get_identity_download_dir().await.unwrap();
+        let download_dir = std::path::Path::new(&dir);
+        if let Some(public_key) = state.storage.get_contact_public_key(&device_id).await {
+            return match CryptoManager::decrypt_unpack_and_verify(
+                &body_bytes,
+                &my_key,
+                &public_key,
+                &download_dir,
+            ) {
+                Ok(_) => (
+                    StatusCode::OK,
                     Json(ApiResponse {
-                        success: false,
-                        data: json!({ "error": err.to_string() }).into(),
-                        code: 400,
-                        message: err.to_string(),
+                        success: true,
+                        data:
+                            json!({ "message": "Archivos descifrados y guardados correctamente" })
+                                .into(),
+                        code: 200,
+                        message: "Archivos descifrados y guardados correctamente".to_string(),
                     }),
-                );
-            }
+                ),
+                Err(err) => {
+                    eprintln!("Error al procesar recepción: {:?}", err);
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(ApiResponse {
+                            success: false,
+                            data: json!({ "error": err.to_string() }).into(),
+                            code: 400,
+                            message: err.to_string(),
+                        }),
+                    );
+                }
+            };
+        }
+
+        let response = ApiResponse {
+            success: true,
+            data: json!({
+                "message": "Bytes recibidos correctamente",
+                "byte_count": body_bytes.len()
+            })
+            .into(),
+            code: 200,
+            message: "Bytes recibidos correctamente".to_string(),
         };
+
+        (StatusCode::OK, Json(response))
     }
-
-
-    let response = ApiResponse {
-        success: true,
-        data: json!({
-            "message": "Bytes recibidos correctamente",
-            "byte_count": body_bytes.len()
-        }).into(),
-        code: 200,
-        message: "Bytes recibidos correctamente".to_string(),
-    };
-
-    (StatusCode::OK, Json(response))
-}
 }

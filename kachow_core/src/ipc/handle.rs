@@ -76,59 +76,78 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
             files_paths,
         } => {
             let path_buf_files: Vec<PathBuf> = files_paths.into_iter().map(PathBuf::from).collect();
-            let my_keys = state.storage.get_identity_secret_key().await.expect("");
-            if let Some(public_key_pem) = state.storage.get_contact_public_key(&target_id).await {
-                match CryptoManager::pack_compress_encrypt_and_sign(
-                    &path_buf_files,
-                    &public_key_pem,
-                    &my_keys,
-                ) {
-                    Ok(bytes) => {
-                        println!("Éxito al empaquetar, tamaño: {} bytes", bytes.len());
 
-                        // 1. Instanciar el cliente de reqwest
-                        let client = reqwest::Client::new();
+            // 1. Obtener claves e información necesaria
+            let my_keys = match state.storage.get_identity_secret_key().await {
+                Some(keys) => keys,
+                None => {
+                    eprintln!("Error al obtener claves de identidad");
+                    return IpcResponse::Error("Failed to retrieve identity key".into());
+                }
+            };
 
-                        // 2. Definir la URL de destino (por ejemplo, el endpoint del otro dispositivo)
-                        let target_url = format!(
-                            "http://{}/receive/{}",
-                            state.get_device_value(&target_id).await.unwrap(),
-                            my_keys.device_id()
-                        );
+            let public_key_pem = match state.storage.get_contact_public_key(&target_id).await {
+                Some(key) => key,
+                None => {
+                    eprintln!("⚠️ No se encontró la clave pública para: {}", target_id);
+                    return IpcResponse::Error("Public key not found".into());
+                }
+            };
 
-                        // 3. Enviar la petición POST asíncrona
-                        match client
-                            .post(&target_url)
-                            .header("Content-Type", "application/json") // O "application/octet-stream" si envías el buffer raw
-                            .body(bytes)
-                            .send()
-                            .await
-                        {
-                            Ok(response) => {
-                                if response.status().is_success() {
-                                    println!(
-                                        "Petición enviada correctamente. Status: {}",
-                                        response.status()
-                                    );
-                                } else {
-                                    eprintln!(
-                                        "El servidor respondió con error: {}",
-                                        response.status()
-                                    );
-                                }
-                            }
-                            Err(err) => {
-                                eprintln!("Error al realizar la petición HTTP POST: {:?}", err);
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        eprintln!("Error al procesar los archivos: {:?}", err);
-                    }
+            let target_address = match state.get_device_value(&target_id).await {
+                Some(addr) => addr,
+                None => {
+                    eprintln!(
+                        "⚠️ No se encontró la dirección para el dispositivo: {}",
+                        target_id
+                    );
+                    return IpcResponse::Error("Device address not found".into());
+                }
+            };
+
+            // 2. Cifrar y empaquetar
+            let bytes = match CryptoManager::pack_compress_encrypt_and_sign(
+                &path_buf_files,
+                &public_key_pem,
+                &my_keys,
+            ) {
+                Ok(b) => b,
+                Err(err) => {
+                    eprintln!("Error al procesar los archivos: {:?}", err);
+                    return IpcResponse::Error("Encryption failed".into());
+                }
+            };
+
+            println!("Éxito al empaquetar, tamaño: {} bytes", bytes.len());
+
+            // 3. Enviar solicitud HTTP POST
+            let target_url = format!("http://{}/receive/{}", target_address, my_keys.device_id());
+
+            // Reutiliza state.http_client en lugar de instanciar uno nuevo
+            match state
+                .http_client
+                .post(&target_url)
+                .header("Content-Type", "application/octet-stream")
+                .body(bytes)
+                .send()
+                .await
+            {
+                Ok(response) if response.status().is_success() => {
+                    println!(
+                        "Petición enviada correctamente. Status: {}",
+                        response.status()
+                    );
+                    IpcResponse::Ok
+                }
+                Ok(response) => {
+                    eprintln!("El servidor respondió con error: {}", response.status());
+                    IpcResponse::Error(format!("Server returned HTTP {}", response.status()))
+                }
+                Err(err) => {
+                    eprintln!("Error al realizar la petición HTTP POST: {:?}", err);
+                    IpcResponse::Error("Network request failed".into())
                 }
             }
-
-            return IpcResponse::Ok;
         }
         IpcRequest::Pair {
             target_id,
@@ -222,9 +241,11 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
                                             .as_str()
                                             .unwrap_or_default()
                                             .to_string(),
-                                        secret_service_name: MdnsManager::normalize_service_type(
-                                            json_payload["secret_service_name"].as_str().unwrap(),
-                                        ),
+                                        secret_service_name: json_payload["secret_service_name"]
+                                            .as_str()
+                                            .unwrap()
+                                            .to_string(),
+
                                         device_image: json_payload["device_image"]
                                             .as_array()
                                             .unwrap_or(&vec![])

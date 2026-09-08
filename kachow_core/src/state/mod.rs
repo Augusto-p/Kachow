@@ -1,5 +1,6 @@
-use std::{collections::HashMap, sync::{Arc, atomic::{AtomicBool, Ordering}}};
+use std::{collections::HashMap, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
 
+use reqwest::Client;
 use tokio::sync::RwLock;
 
 use crate::{database::Database, identity::pair_key::PairKey};
@@ -9,6 +10,7 @@ pub struct KachowState {
     pub pair_key: Arc<PairKey>,
     pub mode: Arc<AtomicBool>, // Garantiza mutación concurrente segura
     pub discovered: RwLock<HashMap<String, String>>,
+    pub http_client: Client,
 }
 
 
@@ -20,6 +22,11 @@ impl KachowState {
             pair_key: Arc::new(PairKey::new()),
             mode: Arc::new(AtomicBool::new(false)),
             discovered: RwLock::new(HashMap::new()), // Cambiado Vec::new() por HashMap::new()
+            http_client: Client::builder()
+        .timeout(Duration::from_secs(30))          // Timeout global por petición
+        .connect_timeout(Duration::from_secs(10))  // Timeout de conexión inicial
+        .pool_max_idle_per_host(10)                // Límite de conexiones inactivas
+        .build().unwrap()
         }
     }
 
@@ -71,6 +78,8 @@ impl KachowState {
     /// Obtiene el valor asociado a una clave específica
     pub async fn get_device_value(&self, key: &str) -> Option<String> {
         let lock = self.discovered.read().await;
+        println!("{:?}", lock);
+        println!("{:?}", key);
         lock.get(key).cloned()
     }
 }
