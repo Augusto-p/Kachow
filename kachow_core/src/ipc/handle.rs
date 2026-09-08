@@ -91,12 +91,8 @@ pub async fn handle_ipc_request(req: IpcRequest, state: Arc<KachowState>) -> Ipc
 
                         // 2. Definir la URL de destino (por ejemplo, el endpoint del otro dispositivo)
                         let target_url = format!(
-                            "https://{}/receive/{}",
-                            state
-                                .storage
-                                .get_contact_secret_service_name(&target_id)
-                                .await
-                                .unwrap(),
+                            "http://{}/receive/{}",
+                            state.get_device_value(&target_id).await.unwrap(),
                             my_keys.device_id()
                         );
 

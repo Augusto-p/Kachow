@@ -92,54 +92,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     mdns_manager.listen(state.clone()).await?;
     println!("🔎 Listener mDNS iniciado.");
     let mdns_task = tokio::spawn(async move {
-        let mut last_announced_names: Vec<String> = Vec::new();
+    let mut last_announced_names: Vec<String> = Vec::new();
 
-        loop {
-            let is_mode_active = mdns_state.is_mode_active();
+    loop {
+        let is_mode_active = mdns_state.is_mode_active();
 
-            let device_id = mdns_state
-                .storage
-                .get_identity_device_id()
-                .await
-                .unwrap_or_default();
+        let device_id = mdns_state
+            .storage
+            .get_identity_device_id()
+            .await
+            .unwrap_or_default();
 
-            let secret_service_name = mdns_state
-                .storage
-                .get_identity_secret_service_name()
-                .await
-                .unwrap_or_default();
+        let secret_service_name = mdns_state
+            .storage
+            .get_identity_secret_service_name()
+            .await
+            .unwrap_or_default();
 
-            // Determinar la lista de nombres a anunciar
-            let mut target_names = Vec::new();
+        let mut target_names = Vec::new();
 
-            if is_mode_active {
-                // Si el modo está activo, hacemos AMBOS anuncios
-                if !device_id.is_empty() {
-                    target_names.push(format!("kachow-{}", device_id));
-                }
-                if !secret_service_name.is_empty() {
-                    target_names.push(secret_service_name);
-                }
-            } else {
-                // Si no está activo, solo anunciamos el nombre privado/secreto
-                if !secret_service_name.is_empty() {
-                    target_names.push(secret_service_name);
-                }
+        if is_mode_active {
+            // Se realizan AMBOS anuncios si el modo está activo
+            if !device_id.is_empty() {
+                target_names.push(format!("kachow-{}", device_id));
             }
-
-            // Re-anunciar únicamente si la lista de nombres cambió respecto al último anuncio
-            if target_names != last_announced_names {
-                if let Err(err) = mdns_manager.announce_names(&target_names) {
-                    eprintln!("⚠️ Error al anunciar servicios mDNS: {}", err);
-                } else {
-                    last_announced_names = target_names;
-                }
+            if !secret_service_name.is_empty() {
+                target_names.push(secret_service_name);
             }
-
-            // Intervalo de verificación
-            tokio::time::sleep(Duration::from_secs(5)).await;
+        } else {
+            // Solo se anuncia el nombre privado/secreto si el modo no está activo
+            if !secret_service_name.is_empty() {
+                target_names.push(secret_service_name);
+            }
         }
-    });
+
+        // Re-anuncia únicamente si la lista de nombres cambió respecto al ciclo anterior
+        if target_names != last_announced_names {
+            if let Err(err) = mdns_manager.announce_names(&target_names) {
+                eprintln!("⚠️ Error al anunciar servicios mDNS: {}", err);
+            } else {
+                last_announced_names = target_names;
+            }
+        }
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+});
 
     // Esperar las tres tareas concurrentes
     tokio::try_join!(web_task, ipc_task, mdns_task)?;

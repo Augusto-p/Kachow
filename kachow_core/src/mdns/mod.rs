@@ -1,4 +1,5 @@
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use std::collections::HashSet;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -13,7 +14,6 @@ fn get_local_ip() -> Option<String> {
 
 pub struct MdnsManager {
     daemon: ServiceDaemon,
-    // Permite guardar múltiples fullnames registrados activos
     current_fullnames: Arc<Mutex<Vec<String>>>,
     service_type: String,
     port: u16,
@@ -32,20 +32,19 @@ impl MdnsManager {
         })
     }
 
-    /// Anuncia una lista de nombres de instancia de forma simultánea.
+    /// Anuncia simultáneamente todos los nombres indicados en `instance_names`
     pub fn announce_names(&self, instance_names: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let mut current = self.current_fullnames.lock().unwrap();
 
-        // 1. Des-registrar todos los anuncios previos
+        // Limpiar anuncios anteriores
         for old_fullname in current.drain(..) {
             let _ = self.daemon.unregister(&old_fullname);
         }
 
         let my_ip = get_local_ip().ok_or("No se pudo obtener la IP local principal")?;
 
-        // 2. Registrar cada uno de los nombres pasados
         for instance_name in instance_names {
-            if instance_name.is_empty() {
+            if instance_name.trim().is_empty() {
                 continue;
             }
 
@@ -63,7 +62,7 @@ impl MdnsManager {
 
             let fullname = service_info.get_fullname().to_string();
             self.daemon.register(service_info)?;
-            println!("📢 [mDNS] Anunciado exitosamente: {}", fullname);
+            println!("📢 [mDNS] Servicio registrado: {}", fullname);
             current.push(fullname);
         }
 
@@ -82,7 +81,13 @@ impl MdnsManager {
     pub async fn listen(&self, state: Arc<KachowState>) -> Result<(), Box<dyn std::error::Error>> {
         let contacts = state.storage.get_all_contact_addresses().await;
 
-        // Escuchamos sobre el service_type base de la aplicación y sobre los servicios de contactos
+        // Conjunto de secret_service_name de nuestros contactos para búsquedas rápidas
+        let valid_contacts: HashSet<String> = contacts
+            .iter()
+            .map(|c| c.secret_service_name.clone())
+            .collect();
+
+        // Tipos de servicio que exploraremos
         let mut service_types: Vec<String> = contacts
             .into_iter()
             .map(|c| Self::normalize_service_type(&c.secret_service_name))
@@ -96,9 +101,17 @@ impl MdnsManager {
             let receiver = self.daemon.browse(&service_type)?;
             let service_type_owned = service_type.clone();
             let state_clone = state.clone();
-            let device_id_me = state
+            let valid_contacts_clone = valid_contacts.clone();
+
+            // Identificadores propios para ignorar transmisiones del propio dispositivo
+            let my_device_id = state
                 .storage
                 .get_identity_device_id()
+                .await
+                .unwrap_or_default();
+            let my_secret_service_name = state
+                .storage
+                .get_identity_secret_service_name()
                 .await
                 .unwrap_or_default();
 
@@ -110,14 +123,19 @@ impl MdnsManager {
                             let instance_name = fullname.split('.').next().unwrap_or(fullname);
                             let lower_instance = instance_name.to_lowercase();
 
-                            // CASO 1: Anuncio público ("kachow-<device_id>")
+                            // 🛑 FILTRO 1: Ignorar si es nuestro propio dispositivo
+                            if instance_name == my_secret_service_name {
+                                continue;
+                            }
                             if let Some(device_id) = lower_instance.strip_prefix("kachow-") {
-                                if device_id == device_id_me {
-                                    continue; // Ignorar mi propio anuncio público
+                                if device_id == my_device_id {
+                                    continue;
                                 }
+
+                                // ✅ CASO A: Dispositivo público con prefijo "kachow-"
                                 if !device_id.is_empty() {
                                     println!(
-                                        "🔎 [Dispositivo Público - {}] ID: '{}' | Host: {}:{}",
+                                        "🔎 [Encontrado público - {}] Device ID: '{}' | Host: {}:{}",
                                         service_type_owned,
                                         device_id,
                                         info.get_hostname(),
@@ -132,11 +150,10 @@ impl MdnsManager {
                                         .await;
                                 }
                             } 
-                            // CASO 2: Anuncio de contacto / privado
-                            else {
-                                // Agregamos el dispositivo detectado independientemente del service_type
+                            // ✅ CASO B: Dispositivo en la lista de contactos
+                            else if valid_contacts_clone.contains(instance_name) {
                                 println!(
-                                    "🔎 [Contacto/Servicio Detectado - {}] Instance: '{}' | Host: {}:{}",
+                                    "🔎 [Encontrado contacto - {}] Contacto: '{}' | Host: {}:{}",
                                     service_type_owned,
                                     instance_name,
                                     info.get_hostname(),
