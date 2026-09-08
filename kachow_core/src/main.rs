@@ -93,6 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔎 Listener mDNS iniciado.");
     let mdns_task = tokio::spawn(async move {
     let mut last_announced_names: Vec<String> = Vec::new();
+    let mut last_mode_state: Option<bool> = None;
+
+    // Contador para refrescar el anuncio mDNS periódicamente en la red
+    let mut refresh_counter: u8 = 0;
 
     loop {
         let is_mode_active = mdns_state.is_mode_active();
@@ -112,7 +116,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut target_names = Vec::new();
 
         if is_mode_active {
-            // Se realizan AMBOS anuncios si el modo está activo
             if !device_id.is_empty() {
                 target_names.push(format!("kachow-{}", device_id));
             }
@@ -120,25 +123,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 target_names.push(secret_service_name);
             }
         } else {
-            // Solo se anuncia el nombre privado/secreto si el modo no está activo
             if !secret_service_name.is_empty() {
                 target_names.push(secret_service_name);
             }
         }
 
-        // Re-anuncia únicamente si la lista de nombres cambió respecto al ciclo anterior
-        if target_names != last_announced_names {
-            if let Err(err) = mdns_manager.announce_names(&target_names) {
+        // Detectar si hubo un cambio real en los nombres, en el estado del modo,
+        // o si es momento de refrescar la publicación en la red local.
+        let names_changed = target_names != last_announced_names;
+        let mode_changed = Some(is_mode_active) != last_mode_state;
+        let should_periodic_refresh = refresh_counter >= 6; // Refresca cada 30 segundos (6 * 5s)
+
+        if names_changed || mode_changed || should_periodic_refresh {
+            println!(
+                "📢 Actualizando mDNS. Modo activo: {}, Nombres: {:?}",
+                is_mode_active, target_names
+            );
+
+            if let Err(err) = mdns_manager.announce_names(&target_names).await {
                 eprintln!("⚠️ Error al anunciar servicios mDNS: {}", err);
             } else {
                 last_announced_names = target_names;
+                last_mode_state = Some(is_mode_active);
+                refresh_counter = 0; // Reiniciar contador tras anunciar con éxito
             }
+        } else {
+            refresh_counter += 1;
         }
 
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 });
-
     // Esperar las tres tareas concurrentes
     tokio::try_join!(web_task, ipc_task, mdns_task)?;
     // Esperar ambos

@@ -1,4 +1,5 @@
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use tokio::net::UdpSocket;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -10,6 +11,13 @@ pub struct MdnsManager {
     current_fullnames: Arc<Mutex<Vec<String>>>,
     service_type: String, // Ejemplo: "_kachow._tcp.local."
     port: u16,
+}
+async fn get_local_ip() -> Option<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    // Conectarse a una IP externa (no envía tráfico real) fuerza al SO a resolver la interfaz
+    socket.connect("8.8.8.8:80").await.ok()?;
+    let local_addr = socket.local_addr().ok()?;
+    Some(local_addr.ip().to_string())
 }
 
 impl MdnsManager {
@@ -34,44 +42,52 @@ impl MdnsManager {
         }
     }
 
-    /// Anuncia una lista de nombres de instancia bajo el service_type principal
-    pub fn announce_names(&self, instance_names: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn announce_names(&self, instance_names: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Extraer los nombres antiguos y liberar el guard INMEDIATAMENTE
+    let old_names: Vec<String> = {
         let mut current = self.current_fullnames.lock().unwrap();
+        current.drain(..).collect()
+    }; // <-- 'current' se destruye (drop) aquí
 
-        // 1. Limpiar registros viejos
-        for old_fullname in current.drain(..) {
-            let _ = self.daemon.unregister(&old_fullname);
-        }
-
-        // 2. Registrar los nuevos nombres de instancia
-        for instance_name in instance_names {
-            let clean_instance = instance_name.trim();
-            if clean_instance.is_empty() {
-                continue;
-            }
-
-            let host_name = format!("{}.local.", clean_instance.to_lowercase().replace(' ', "-"));
-            let properties: HashMap<String, String> = HashMap::new();
-
-            // NOTA: Para la IP se pasa "" para dejar que mdns-sd autodetecte las interfaces locales
-            let service_info = ServiceInfo::new(
-                &self.service_type,
-                clean_instance,
-                &host_name,
-                "", 
-                self.port,
-                properties,
-            )?;
-
-            let fullname = service_info.get_fullname().to_string();
-            self.daemon.register(service_info)?;
-            println!("📢 [mDNS - OK] Anunciado: {}", fullname);
-            current.push(fullname);
-        }
-
-        Ok(())
+    // 2. Ahora es seguro hacer llamadas .await
+    for old_fullname in old_names {
+        let _ = self.daemon.unregister(&old_fullname);
     }
 
+    let mut new_fullnames = Vec::new();
+
+    // 3. Procesar los nuevos nombres
+    for instance_name in instance_names {
+        let clean_instance = instance_name.trim();
+        if clean_instance.is_empty() {
+            continue;
+        }
+
+        let host_name = format!("{}.local.", clean_instance.to_lowercase().replace(' ', "-"));
+        let my_ip = get_local_ip().await.unwrap_or_else(|| "127.0.0.1".to_string());
+
+        let service_info = ServiceInfo::new(
+            &self.service_type,
+            clean_instance,
+            &host_name,
+            &my_ip, 
+            self.port,
+            HashMap::new(),
+        )?;
+
+        let fullname = service_info.get_fullname().to_string();
+        self.daemon.register(service_info)?;
+        new_fullnames.push(fullname);
+    }
+
+    // 4. Actualizar la lista en el mutex (bloqueando de nuevo de forma breve)
+    {
+        let mut current = self.current_fullnames.lock().unwrap();
+        *current = new_fullnames;
+    } // <-- 'current' se vuelve a liberar aquí
+
+    Ok(())
+}
     pub async fn listen(&self, state: Arc<KachowState>) -> Result<(), Box<dyn std::error::Error>> {
         // Escuchar únicamente en el service_type común de la aplicación
         let receiver = self.daemon.browse(&self.service_type)?;
@@ -110,6 +126,7 @@ impl MdnsManager {
                             continue;
                         }
 
+                        println!("{}", instance_name);
                         // CASO 1: Es un anuncio público ("kachow-<device_id>")
                         if let Some(device_id) = lower_instance.strip_prefix("kachow-") {
                             if device_id == my_device_id || device_id.is_empty() {
